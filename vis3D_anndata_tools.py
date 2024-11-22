@@ -143,7 +143,7 @@ def set_bgcolor(bg_color = "rgb(20, 20, 20)",
 def plot_3D_interactive_plotly(adata, obs_column_name =None, gene_names=None, values = None,
                               pixelsize_xy = 1, pixelsize_z = 1, units = 'um', markersize = 1, opacity = 0.8,
                               obsm_positions = 'spatial_affine_postreg', cmin = None, cmax = None, colormap = 'Reds',
-                              background_black = False):
+                              background_black = False, save_html = None):
     #adata: AnnData object; obs_column_name: name of the column in adata.obs to visualise; values: visualise only this values from obs_column_name; gene_names: list of names of genes expression to visualise (i would not go for more than 5 genes due to the color mixing) 
     #pixelsize_xy: size of the pixel in xy in a chosen units; pixelsize_z - size of the pixel in z in a chosen units; units: chosen units  only for display; markersize: size of one visium spot; opacity: opacity of the spot
     #obsm_positions: name of the attribute in obsm to use as spot positions, cmin, cmax: min, max intensity value for gene expression for colormap; colormap: name of colormap to use
@@ -207,3 +207,5 @@ def plot_3D_interactive_plotly(adata, obs_column_name =None, gene_names=None, va
     
     # Render the plot.
     plotly.offline.iplot(plot_figure)
+    if save_html:
+        plot_figure.write_html(save_html)
