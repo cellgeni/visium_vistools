@@ -21,7 +21,23 @@ def create_3D_spot_pos(adata, obsm_positions):
         Zpos+=1
     return x, y, z
 
- 
+def create_3D_spot_pos_thickness_from_table(adata, obsm_positions, thickness_table, thickness_section = 5):
+    list_of_section_names = list(adata.uns['spatial'].keys())
+    x = np.array([]); y = np.array([]); z = np.array([]);
+    Zpos = 0;
+    for section_name in list_of_section_names:
+        idx = adata.obs.index.str.contains(section_name)
+        spot_pos_section = adata.obsm[obsm_positions][idx]
+        x = np.append(x, spot_pos_section[:,0])
+        y = np.append(y, spot_pos_section[:,1])
+        Zpos = getzpos_from_section_name(thickness_table, section_name, thickness_section)
+        zz = np.ones((spot_pos_section.shape[0]))*Zpos
+        z = np.append(z, zz)
+    return x, y, z
+
+def getzpos_from_section_name(thickness_table, section_name, thickness_section = 5):
+    section_number = int(section_name[-3:])
+    return np.sum(thickness_table['distance_between_sections'][:section_number+1]) + section_number*thickness_section 
     
 def prepare_color_list(column, values, grey_color = '#eeeeee'):
     colormap_discrete = ['#e69f00', '#56b4e9', '#009e73', '#f0e442', '#0072b2', '#d55e00', '#cc79a7','#000000']
@@ -143,23 +159,28 @@ def set_bgcolor(bg_color = "rgb(20, 20, 20)",
 def plot_3D_interactive_plotly(adata, obs_column_name =None, gene_names=None, values = None,
                               pixelsize_xy = 1, pixelsize_z = 1, units = 'um', markersize = 1, opacity = 0.8,
                               obsm_positions = 'spatial_affine_postreg', cmin = None, cmax = None, colormap = 'Reds',
-                              background_black = False, save_html = None):
+                              background_black = False, thickness_sections_table_path = None, save_html = None,
+                              thickness_one_section = 5):
     #adata: AnnData object; obs_column_name: name of the column in adata.obs to visualise; values: visualise only this values from obs_column_name; gene_names: list of names of genes expression to visualise (i would not go for more than 5 genes due to the color mixing) 
     #pixelsize_xy: size of the pixel in xy in a chosen units; pixelsize_z - size of the pixel in z in a chosen units; units: chosen units  only for display; markersize: size of one visium spot; opacity: opacity of the spot
     #obsm_positions: name of the attribute in obsm to use as spot positions, cmin, cmax: min, max intensity value for gene expression for colormap; colormap: name of colormap to use
         
     # Configure Plotly to be rendered inline in the notebook.
     plotly.offline.init_notebook_mode()
-    if obs_column_name and gene_names:
-        
-        adata_filtered = filter_anndata(adata, obs_column_name, values)
+    
+    if thickness_sections_table_path:
+        thickness_table = pd.read_csv(thickness_sections_table_path)
+        x,y,z = create_3D_spot_pos_thickness_from_table(adata, obsm_positions, thickness_table, thickness_one_section)
+    else:
         x,y,z = create_3D_spot_pos(adata_filtered, obsm_positions)
-        x*=pixelsize_xy; y*=pixelsize_xy; z*=pixelsize_z
+        z*=pixelsize_z
+    x*=pixelsize_xy; y*=pixelsize_xy; 
+    
+    if obs_column_name and gene_names:        
+        adata_filtered = filter_anndata(adata, obs_column_name, values)        
         trace, colors_list_cont, cmin_list, cmax_list = prepare_trace_continuous(adata_filtered, gene_names, x, y, z, cmin, cmax, markersize)
         
     elif obs_column_name and not gene_names:
-        x,y,z = create_3D_spot_pos(adata, obsm_positions)
-        x*=pixelsize_xy; y*=pixelsize_xy; z*=pixelsize_z
         #prepare color list
         column = adata.obs[obs_column_name]
         color_list, roi_list, colormaps = prepare_color_list(column, values)
@@ -169,8 +190,6 @@ def plot_3D_interactive_plotly(adata, obs_column_name =None, gene_names=None, va
         name="")
 
     elif gene_names and not obs_column_name:
-        x,y,z = create_3D_spot_pos(adata, obsm_positions)
-        x*=pixelsize_xy; y*=pixelsize_xy; z*=pixelsize_z
         trace, colors_list_cont, cmin_list, cmax_list = prepare_trace_continuous(adata, gene_names, x, y, z, cmin, cmax, markersize)
 
     else:
