@@ -38,6 +38,28 @@ def create_3D_spot_pos_thickness_from_table(adata, obsm_positions, thickness_tab
 def getzpos_from_section_name(thickness_table, section_name, thickness_section = 5):
     section_number = int(section_name[-3:])
     return np.sum(thickness_table['distance_between_sections'][:section_number+1]) + section_number*thickness_section 
+
+
+
+def prepare_traces_categorical(x,y,z, column, values, markersize, opacity, show_unassigned = True, grey_color = '#eeeeee'):
+    colormap_discrete = ['#e69f00', '#56b4e9', '#009e73', '#f0e442', '#0072b2', '#d55e00', '#cc79a7','#000000']
+    traces =[]; IDX = []
+    if not values:
+        values = np.unique(column)
+    for roi,i in zip(values, range(len(values))):
+        idx = column==roi
+        idx = np.where(idx.values==True)[0]
+        IDX+=list(idx)
+        xx = x[idx]; yy = y[idx]; zz = z[idx]
+        traces.append(go.Scatter3d(x=xx,  y=yy, z=zz, mode='markers', marker={'size': markersize, 'opacity': opacity, 'color': colormap_discrete[i%len(colormap_discrete)]},
+        name=roi))
+    if show_unassigned:
+        xx = np.delete(x, IDX); yy = np.delete(y, IDX); zz = np.delete(z, IDX); 
+        traces.append(go.Scatter3d(x=xx,  y=yy, z=zz, mode='markers', marker={'size': markersize, 'opacity': opacity, 'color': grey_color}, name="unassigned"))
+    return traces
+        
+    
+    
     
 def prepare_color_list(column, values, grey_color = '#eeeeee'):
     colormap_discrete = ['#e69f00', '#56b4e9', '#009e73', '#f0e442', '#0072b2', '#d55e00', '#cc79a7','#000000']
@@ -49,9 +71,7 @@ def prepare_color_list(column, values, grey_color = '#eeeeee'):
     for roi in values:
         idx = column==roi
         idx = np.where(idx.values==True)[0]
-        #print(idx)
         for idd in idx:
-            #print(idd)
             color_list[idd] = colormap_discrete[i%len(colormap_discrete)]
         i+=1
     return color_list, values, colormap_discrete
@@ -156,65 +176,75 @@ def set_bgcolor(bg_color = "rgb(20, 20, 20)",
                 zeroline=zeroline)
 
 
-def plot_3D_interactive_plotly(adata, obs_column_name =None, gene_names=None, values = None,
-                              pixelsize_xy = 1, pixelsize_z = 1, units = 'um', markersize = 1, opacity = 0.8,
-                              obsm_positions = 'spatial_affine_postreg', cmin = None, cmax = None, colormap = 'Reds',
-                              background_black = False, thickness_sections_table_path = None, save_html = None,
-                              thickness_one_section = 5):
-    #adata: AnnData object; obs_column_name: name of the column in adata.obs to visualise; values: visualise only this values from obs_column_name; gene_names: list of names of genes expression to visualise (i would not go for more than 5 genes due to the color mixing) 
-    #pixelsize_xy: size of the pixel in xy in a chosen units; pixelsize_z - size of the pixel in z in a chosen units; units: chosen units  only for display; markersize: size of one visium spot; opacity: opacity of the spot
-    #obsm_positions: name of the attribute in obsm to use as spot positions, cmin, cmax: min, max intensity value for gene expression for colormap; colormap: name of colormap to use
-        
-    # Configure Plotly to be rendered inline in the notebook.
-    plotly.offline.init_notebook_mode()
-    
+def get_xyz(adata, pixelsize_xy, pixelsize_z, obsm_positions, thickness_sections_table_path, thickness_one_section):
     if thickness_sections_table_path:
         thickness_table = pd.read_csv(thickness_sections_table_path)
         x,y,z = create_3D_spot_pos_thickness_from_table(adata, obsm_positions, thickness_table, thickness_one_section)
     else:
-        x,y,z = create_3D_spot_pos(adata_filtered, obsm_positions)
+        x,y,z = create_3D_spot_pos(adata, obsm_positions)
         z*=pixelsize_z
     x*=pixelsize_xy; y*=pixelsize_xy; 
+    return x,y,z
+
+def plot_3D_interactive_plotly(adata, obs_column_name =None, gene_names=None, values = None,
+                              pixelsize_xy = 1, pixelsize_z = 1, units = 'um', markersize = 1, opacity = 0.8,
+                              obsm_positions = 'spatial_affine_postreg', cmin = None, cmax = None, colormap = 'Reds',
+                              background_black = False, thickness_sections_table_path = None, save_html = None,
+                              thickness_one_section = 5, show_unassigned = True):
+    #adata: AnnData object; obs_column_name: name of the column in adata.obs to visualise; values: visualise only this values from obs_column_name; gene_names: list of names of genes expression to visualise (i would not go for more than 5 genes due to the color mixing) 
+    #pixelsize_xy: size of the pixel in xy in a chosen units; pixelsize_z - size of the pixel in z in a chosen units; units: chosen units  only for display; markersize: size of one visium spot; opacity: opacity of the spot
+    #obsm_positions: name of the attribute in obsm to use as spot positions, cmin, cmax: min, max intensity value for gene expression for colormap; colormap: name of colormap to use
+    #background_black: whether to use black background; thickness_sections_table_path = path to the csv with all info about section distances;
+    #thickness_one_section: thickness of one section; save_html: path to html file to be saved with figure; 
+    #show_unassigned: whether to show or not unassigned spots (in case of using adata.obs categorical column)
+    # Configure Plotly to be rendered inline in the notebook.
+    plotly.offline.init_notebook_mode()
+    
+    
     
     if obs_column_name and gene_names:        
-        adata_filtered = filter_anndata(adata, obs_column_name, values)        
+        adata_filtered = filter_anndata(adata, obs_column_name, values)
+        x,y,z = get_xyz(adata_filtered, pixelsize_xy, pixelsize_z, obsm_positions, thickness_sections_table_path, thickness_one_section)
         trace, colors_list_cont, cmin_list, cmax_list = prepare_trace_continuous(adata_filtered, gene_names, x, y, z, cmin, cmax, markersize)
-        
+        data = [trace]
     elif obs_column_name and not gene_names:
         #prepare color list
+        
         column = adata.obs[obs_column_name]
-        color_list, roi_list, colormaps = prepare_color_list(column, values)
-
-        # Configure the trace.
-        trace = go.Scatter3d(x=x,  y=y, z=z, mode='markers', marker={'size': markersize, 'opacity': opacity, 'color': color_list},
-        name="")
-
+        x,y,z = get_xyz(adata, pixelsize_xy, pixelsize_z, obsm_positions, thickness_sections_table_path, thickness_one_section)
+        trace = prepare_traces_categorical(x,y,z, column, values, markersize, opacity, show_unassigned)
+        data=trace
     elif gene_names and not obs_column_name:
+        x,y,z = get_xyz(adata, pixelsize_xy, pixelsize_z, obsm_positions, thickness_sections_table_path, thickness_one_section)
         trace, colors_list_cont, cmin_list, cmax_list = prepare_trace_continuous(adata, gene_names, x, y, z, cmin, cmax, markersize)
-
+        data = [trace]
     else:
         raise ValueError("Please specify gene_names or obs_column_name!")
 
     
 
-    data = [trace]
+    
     layout = go.Layout({'xaxis': {
     'range': [0.2, 1],
     'showgrid': False, # thin lines in the background
     'zeroline': False, # thick line at x=0
-    'visible': False},
+    'visible': False,
+    'title': str('x, ' + units)},
     'yaxis': {
     'range': [0.2, 1],
     'showgrid': False, # thin lines in the background
     'zeroline': False, # thick line at x=0
-    'visible': False}},
-        margin={'l': 0, 'r': 0, 'b': 0, 't': 0}
+    'visible': False,
+    'title': 'aaaaaa'},
+    },
+    margin={'l': 0, 'r': 0, 'b': 0, 't': 0},
+    scene=dict(aspectmode='data', xaxis=dict(title=dict(text='x, '+units)),  yaxis=dict(title=dict(text='y, '+units)),  zaxis=dict(title=dict(text='z, '+units))),
     )
     plot_figure = go.Figure(data=data, layout=layout)
     
 
     if obs_column_name and not gene_names:
-        add_legend(plot_figure, roi_list, colormaps, obs_column_name)
+        pass
     else:
         add_legend_continuous(plot_figure, colors_list_cont, cmin_list, cmax_list, gene_names)
       
@@ -223,8 +253,10 @@ def plot_3D_interactive_plotly(adata, obs_column_name =None, gene_names=None, va
         plot_figure.update_scenes(xaxis=set_bgcolor(), 
                       yaxis=set_bgcolor(), 
                       zaxis=set_bgcolor())
+
     
     # Render the plot.
-    plotly.offline.iplot(plot_figure)
+    #plotly.offline.iplot(plot_figure)
     if save_html:
         plot_figure.write_html(save_html)
+    return plot_figure
