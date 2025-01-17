@@ -189,15 +189,19 @@ def get_xyz(adata, pixelsize_xy, pixelsize_z, obsm_positions, thickness_sections
 def plot_3D_interactive_plotly(adata, obs_column_name =None, gene_names=None, values = None,
                               pixelsize_xy = 1, pixelsize_z = 1, units = 'um', markersize = 1, opacity = 0.8,
                               obsm_positions = 'spatial_affine_postreg', cmin = None, cmax = None, colormap = 'Reds',
-                              background_black = False, thickness_sections_table_path = None, save_html = None,
+                              plot_width=1000, plot_height=1000, background_black = False, 
+                              thickness_sections_table_path = None, save_html = None,
                               thickness_one_section = 5, show_unassigned = True):
-    #adata: AnnData object; obs_column_name: name of the column in adata.obs to visualise; values: visualise only this values from obs_column_name; gene_names: list of names of genes expression to visualise (i would not go for more than 5 genes due to the color mixing) 
-    #pixelsize_xy: size of the pixel in xy in a chosen units; pixelsize_z - size of the pixel in z in a chosen units; units: chosen units  only for display; markersize: size of one visium spot; opacity: opacity of the spot
-    #obsm_positions: name of the attribute in obsm to use as spot positions, cmin, cmax: min, max intensity value for gene expression for colormap; colormap: name of colormap to use
-    #background_black: whether to use black background; thickness_sections_table_path = path to the csv with all info about section distances;
-    #thickness_one_section: thickness of one section; save_html: path to html file to be saved with figure; 
-    #show_unassigned: whether to show or not unassigned spots (in case of using adata.obs categorical column)
-    # Configure Plotly to be rendered inline in the notebook.
+    '''
+        adata: AnnData object; obs_column_name: name of the column in adata.obs to visualise; values: visualise only this values from obs_column_name; gene_names: list of names of genes expression to visualise (i would not go for more than 5 genes due to the color mixing) 
+        pixelsize_xy: size of the pixel in xy in a chosen units; pixelsize_z - size of the pixel in z in a chosen units; units: chosen units  only for display; markersize: size of one visium spot; opacity: opacity of the spot
+        obsm_positions: name of the attribute in obsm to use as spot positions, cmin, cmax: min, max intensity value for gene expression for colormap; colormap: name of colormap to use
+        plot_width, plot_height: width and height of the plot;
+        background_black: whether to use black background; thickness_sections_table_path = path to the csv with all info about section distances;
+        thickness_one_section: thickness of one section; save_html: path to html file to be saved with figure; 
+        show_unassigned: whether to show or not unassigned spots (in case of using adata.obs categorical column)
+        Configure Plotly to be rendered inline in the notebook.
+    '''
     plotly.offline.init_notebook_mode()
     
     
@@ -237,6 +241,8 @@ def plot_3D_interactive_plotly(adata, obs_column_name =None, gene_names=None, va
     'visible': False,
     'title': 'aaaaaa'},
     },
+    width=plot_width,
+    height=plot_height,
     margin={'l': 0, 'r': 0, 'b': 0, 't': 0},
     scene=dict(aspectmode='data', xaxis=dict(title=dict(text='x, '+units)),  yaxis=dict(title=dict(text='y, '+units)),  zaxis=dict(title=dict(text='z, '+units))),
     )
@@ -249,7 +255,7 @@ def plot_3D_interactive_plotly(adata, obs_column_name =None, gene_names=None, va
         add_legend_continuous(plot_figure, colors_list_cont, cmin_list, cmax_list, gene_names)
       
     if background_black:
-        plot_figure.update_layout(paper_bgcolor='rgba(0,0,0,255)', font=dict(color= 'white'))
+        plot_figure.update_layout(template='plotly_dark',paper_bgcolor='rgba(0,0,0,255)', plot_bgcolor='rgba(0,0,0,255)', font=dict(color= 'white'))
         plot_figure.update_scenes(xaxis=set_bgcolor(), 
                       yaxis=set_bgcolor(), 
                       zaxis=set_bgcolor())
