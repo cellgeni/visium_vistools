@@ -7,33 +7,118 @@ import plotly.graph_objs as go
 import warnings
 warnings.filterwarnings('ignore')
 
-def create_3D_spot_pos(adata, obsm_positions):
-    list_of_section_names = list(adata.uns['spatial'].keys())
-    x = np.array([]); y = np.array([]); z = np.array([]);
-    Zpos = 0;
-    for section_name in list_of_section_names:
-        idx = adata.obs.index.str.contains(section_name)
-        spot_pos_section = adata.obsm[obsm_positions][idx]
-        x = np.append(x, spot_pos_section[:,0])
-        y = np.append(y, spot_pos_section[:,1])
-        zz = np.ones((spot_pos_section.shape[0]))*Zpos
-        z = np.append(z, zz)
-        Zpos+=1
-    return x, y, z
+def _get_section_mask(adata, section_name, section_obs_col="section"):
+    if section_obs_col in adata.obs.columns:
+        return (adata.obs[section_obs_col].astype(str) == str(section_name)).to_numpy()
+    return adata.obs.index.astype(str).str.contains(str(section_name), regex=False).to_numpy()
 
-def create_3D_spot_pos_thickness_from_table(adata, obsm_positions, thickness_table, thickness_section = 5):
-    list_of_section_names = list(adata.uns['spatial'].keys())
-    x = np.array([]); y = np.array([]); z = np.array([]);
-    Zpos = 0;
+
+def create_3D_spot_pos(
+    adata,
+    obsm_positions,
+    use_obsm_z=True,
+    section_obs_col="section",
+    debug=False,
+):
+    list_of_section_names = list(adata.uns["spatial"].keys())
+
+    x = np.array([], dtype=float)
+    y = np.array([], dtype=float)
+    z = np.array([], dtype=float)
+    row_order = []
+
+    Zpos = 0
     for section_name in list_of_section_names:
-        idx = adata.obs.index.str.contains(section_name)
-        spot_pos_section = adata.obsm[obsm_positions][idx]
-        x = np.append(x, spot_pos_section[:,0])
-        y = np.append(y, spot_pos_section[:,1])
-        Zpos = getzpos_from_section_name(thickness_table, section_name, thickness_section)
-        zz = np.ones((spot_pos_section.shape[0]))*Zpos
+        idx = _get_section_mask(adata, section_name, section_obs_col=section_obs_col)
+        selected_idx = np.where(idx)[0]
+        n = int(idx.sum())
+
+        if debug:
+            print(f"{section_name}: {n} cells")
+
+        if n == 0:
+            continue
+
+        spot_pos_section = np.asarray(adata.obsm[obsm_positions][idx], dtype=float)
+
+        if spot_pos_section.shape[1] < 2:
+            raise ValueError(
+                f"adata.obsm['{obsm_positions}'] must have at least 2 columns"
+            )
+
+        x = np.append(x, spot_pos_section[:, 0])
+        y = np.append(y, spot_pos_section[:, 1])
+
+        if use_obsm_z and spot_pos_section.shape[1] >= 3:
+            zz = spot_pos_section[:, 2]
+        else:
+            zz = np.full(spot_pos_section.shape[0], Zpos, dtype=float)
+            Zpos += 1
+
         z = np.append(z, zz)
-    return x, y, z
+        row_order.extend(selected_idx.tolist())
+
+        if debug:
+            print(f"  z unique: {np.unique(zz)}")
+
+    return x, y, z, np.array(row_order, dtype=int)
+
+
+def create_3D_spot_pos_thickness_from_table(
+    adata,
+    obsm_positions,
+    thickness_table,
+    thickness_section=5,
+    use_obsm_z=False,
+    section_obs_col="section",
+    debug=False,
+):
+    list_of_section_names = list(adata.uns["spatial"].keys())
+
+    x = np.array([], dtype=float)
+    y = np.array([], dtype=float)
+    z = np.array([], dtype=float)
+    row_order = []
+
+    for section_name in list_of_section_names:
+        idx = _get_section_mask(adata, section_name, section_obs_col=section_obs_col)
+        selected_idx = np.where(idx)[0]
+        n = int(idx.sum())
+
+        if debug:
+            print(f"{section_name}: {n} cells")
+
+        if n == 0:
+            continue
+
+        spot_pos_section = np.asarray(adata.obsm[obsm_positions][idx], dtype=float)
+
+        if spot_pos_section.shape[1] < 2:
+            raise ValueError(
+                f"adata.obsm['{obsm_positions}'] must have at least 2 columns"
+            )
+
+        x = np.append(x, spot_pos_section[:, 0])
+        y = np.append(y, spot_pos_section[:, 1])
+
+        if use_obsm_z and spot_pos_section.shape[1] >= 3:
+            zz = spot_pos_section[:, 2]
+        else:
+            Zpos = getzpos_from_section_name(
+                thickness_table,
+                section_name,
+                thickness_section,
+            )
+            zz = np.full(spot_pos_section.shape[0], Zpos, dtype=float)
+
+        z = np.append(z, zz)
+        row_order.extend(selected_idx.tolist())
+
+        if debug:
+            print(f"  z unique: {np.unique(zz)}")
+
+    return x, y, z, np.array(row_order, dtype=int)
+
 
 def getzpos_from_section_name(thickness_table, section_name, thickness_section = 5):
     section_number = int(section_name[-3:])
@@ -117,6 +202,39 @@ def add_legend_continuous(fig, colors_list, cmin_list, cmax_list, gene_list):
         mode="markers",
         marker=dict(color=col_s, size=10)))
 
+def _set_equal_axes(fig, x, y, z):
+    import numpy as np
+
+    x = np.asarray(x); y = np.asarray(y); z = np.asarray(z)
+
+    xmin, xmax = x.min(), x.max()
+    ymin, ymax = y.min(), y.max()
+    zmin, zmax = z.min(), z.max()
+
+    # largest span
+    span = max(xmax - xmin, ymax - ymin, zmax - zmin)
+    if span == 0:
+        span = 1.0
+
+    # centers
+    cx = (xmin + xmax) / 2
+    cy = (ymin + ymax) / 2
+    cz = (zmin + zmax) / 2
+
+    # symmetric ranges
+    xr = [cx - span/2, cx + span/2]
+    yr = [cy - span/2, cy + span/2]
+    zr = [cz - span/2, cz + span/2]
+
+    fig.update_layout(
+        scene=dict(
+            aspectmode="manual",
+            aspectratio=dict(x=1, y=1, z=1),
+            xaxis=dict(range=xr),
+            yaxis=dict(range=yr),
+            zaxis=dict(range=zr),
+        )
+    )
 
 def prepare_trace_continuous(adata, gene_names, x, y, z, cmin, cmax, markersize):
     #hardcoded colors taken from c2l
@@ -124,8 +242,17 @@ def prepare_trace_continuous(adata, gene_names, x, y, z, cmin, cmax, markersize)
     #cycle is meant to mix colors and opacity in case of several genes(sets) to be displayed
     cmin_list = []; cmax_list = []
     for i in range(np.min([len(final_color_list), len(gene_names)])):
-        id_gene = adata.var['SYMBOL']==gene_names[i]
-        idx = np.where(id_gene==True)[0][0]
+        if "SYMBOL" in adata.var.columns:
+            id_gene = adata.var["SYMBOL"] == gene_names[i]
+            matches = np.where(id_gene)[0]
+        else:
+            matches = np.where(adata.var_names.astype(str) == str(gene_names[i]))[0]
+
+        if len(matches) == 0:
+            raise ValueError(f"Gene '{gene_names[i]}' not found in adata.var['SYMBOL'] or adata.var_names")
+
+        idx = matches[0]
+
         gene_expr = adata.X[:,idx].toarray()[:,0]
         opacity_array, color_list_R, color_list_G, color_list_B, cmin1, cmax1 = get_color_opacity_arrays(gene_expr, cmin, cmax, color_final = final_color_list[i])
         cmin_list.append(cmin1); cmax_list.append(cmax1); 
@@ -176,87 +303,195 @@ def set_bgcolor(bg_color = "rgb(20, 20, 20)",
                 zeroline=zeroline)
 
 
-def get_xyz(adata, pixelsize_xy, pixelsize_z, obsm_positions, thickness_sections_table_path, thickness_one_section):
-    if thickness_sections_table_path:
-        thickness_table = pd.read_csv(thickness_sections_table_path)
-        x,y,z = create_3D_spot_pos_thickness_from_table(adata, obsm_positions, thickness_table, thickness_one_section)
-    else:
-        x,y,z = create_3D_spot_pos(adata, obsm_positions)
-        z*=pixelsize_z
-    x*=pixelsize_xy; y*=pixelsize_xy; 
-    return x,y,z
+def get_xyz(
+    adata,
+    pixelsize_xy,
+    pixelsize_z,
+    obsm_positions,
+    thickness_sections_table_path=None,
+    thickness_one_section=5,
+    use_obsm_z=True,
+    section_obs_col="section",
+    debug=False,
+):
+    coords = np.asarray(adata.obsm[obsm_positions])
+    if coords.shape[1] < 2:
+        raise ValueError(
+            f"adata.obsm['{obsm_positions}'] must have at least 2 columns"
+        )
 
-def plot_3D_interactive_plotly(adata, obs_column_name =None, gene_names=None, values = None,
-                              pixelsize_xy = 1, pixelsize_z = 1, units = 'um', markersize = 1, opacity = 0.8,
-                              obsm_positions = 'spatial_affine_postreg', cmin = None, cmax = None, colormap = 'Reds',
-                              background_black = False, thickness_sections_table_path = None, save_html = None,
-                              thickness_one_section = 5, show_unassigned = True):
-    #adata: AnnData object; obs_column_name: name of the column in adata.obs to visualise; values: visualise only this values from obs_column_name; gene_names: list of names of genes expression to visualise (i would not go for more than 5 genes due to the color mixing) 
-    #pixelsize_xy: size of the pixel in xy in a chosen units; pixelsize_z - size of the pixel in z in a chosen units; units: chosen units  only for display; markersize: size of one visium spot; opacity: opacity of the spot
-    #obsm_positions: name of the attribute in obsm to use as spot positions, cmin, cmax: min, max intensity value for gene expression for colormap; colormap: name of colormap to use
-    #background_black: whether to use black background; thickness_sections_table_path = path to the csv with all info about section distances;
-    #thickness_one_section: thickness of one section; save_html: path to html file to be saved with figure; 
-    #show_unassigned: whether to show or not unassigned spots (in case of using adata.obs categorical column)
-    # Configure Plotly to be rendered inline in the notebook.
+    has_obsm_z = coords.shape[1] >= 3
+
+    if use_obsm_z and has_obsm_z:
+        x, y, z, row_order = create_3D_spot_pos(
+            adata,
+            obsm_positions,
+            use_obsm_z=True,
+            section_obs_col=section_obs_col,
+            debug=debug,
+        )
+    elif thickness_sections_table_path:
+        thickness_table = pd.read_csv(thickness_sections_table_path)
+        x, y, z, row_order = create_3D_spot_pos_thickness_from_table(
+            adata,
+            obsm_positions,
+            thickness_table,
+            thickness_one_section,
+            use_obsm_z=False,
+            section_obs_col=section_obs_col,
+            debug=debug,
+        )
+    else:
+        x, y, z, row_order = create_3D_spot_pos(
+            adata,
+            obsm_positions,
+            use_obsm_z=False,
+            section_obs_col=section_obs_col,
+            debug=debug,
+        )
+
+    x = x * pixelsize_xy
+    y = y * pixelsize_xy
+    z = z * pixelsize_z
+
+    if debug:
+        print("final xyz lengths:", len(x), len(y), len(z))
+        print("final unique z:", np.unique(z))
+
+    return x, y, z, row_order
+
+def plot_3D_interactive_plotly(
+    adata,
+    obs_column_name=None,
+    gene_names=None,
+    values=None,
+    pixelsize_xy=1,
+    pixelsize_z=1,
+    units="um",
+    markersize=1,
+    opacity=0.8,
+    obsm_positions="spatial_affine_postreg",
+    cmin=None,
+    cmax=None,
+    colormap="Reds",
+    background_black=False,
+    thickness_sections_table_path=None,
+    save_html=None,
+    thickness_one_section=5,
+    show_unassigned=True,
+    use_obsm_z=True,
+    equal_axis = False
+):
+    """
+    Plot 3D points from AnnData.
+
+    z handling priority:
+    1. If use_obsm_z=True and adata.obsm[obsm_positions] has 3 columns, use col 3 as z.
+    2. Else if thickness_sections_table_path is provided, compute z from that CSV.
+    3. Else use section order.
+    """
     plotly.offline.init_notebook_mode()
-    
-    
-    
-    if obs_column_name and gene_names:        
+
+    if obs_column_name and gene_names:
         adata_filtered = filter_anndata(adata, obs_column_name, values)
-        x,y,z = get_xyz(adata_filtered, pixelsize_xy, pixelsize_z, obsm_positions, thickness_sections_table_path, thickness_one_section)
-        trace, colors_list_cont, cmin_list, cmax_list = prepare_trace_continuous(adata_filtered, gene_names, x, y, z, cmin, cmax, markersize)
+        x, y, z, row_order = get_xyz(
+            adata_filtered,
+            pixelsize_xy,
+            pixelsize_z,
+            obsm_positions,
+            thickness_sections_table_path,
+            thickness_one_section,
+            use_obsm_z=use_obsm_z,
+        )
+        trace, colors_list_cont, cmin_list, cmax_list = prepare_trace_continuous(
+            adata_filtered, gene_names, x, y, z, cmin, cmax, markersize
+        )
         data = [trace]
+
     elif obs_column_name and not gene_names:
-        #prepare color list
-        
-        column = adata.obs[obs_column_name]
-        x,y,z = get_xyz(adata, pixelsize_xy, pixelsize_z, obsm_positions, thickness_sections_table_path, thickness_one_section)
-        trace = prepare_traces_categorical(x,y,z, column, values, markersize, opacity, show_unassigned)
-        data=trace
+        x, y, z, row_order = get_xyz(
+            adata,
+            pixelsize_xy,
+            pixelsize_z,
+            obsm_positions,
+            thickness_sections_table_path,
+            thickness_one_section,
+            use_obsm_z=use_obsm_z,
+        )
+        column = adata.obs[obs_column_name].iloc[row_order]
+        trace = prepare_traces_categorical(
+            x, y, z, column, values, markersize, opacity, show_unassigned
+        )
+        data = trace
+
     elif gene_names and not obs_column_name:
-        x,y,z = get_xyz(adata, pixelsize_xy, pixelsize_z, obsm_positions, thickness_sections_table_path, thickness_one_section)
-        trace, colors_list_cont, cmin_list, cmax_list = prepare_trace_continuous(adata, gene_names, x, y, z, cmin, cmax, markersize)
+        x, y, z, row_order = get_xyz(
+            adata,
+            pixelsize_xy,
+            pixelsize_z,
+            obsm_positions,
+            thickness_sections_table_path,
+            thickness_one_section,
+            use_obsm_z=use_obsm_z,
+        )
+        trace, colors_list_cont, cmin_list, cmax_list = prepare_trace_continuous(
+            adata, gene_names, x, y, z, cmin, cmax, markersize
+        )
         data = [trace]
+
     else:
         raise ValueError("Please specify gene_names or obs_column_name!")
 
-    
-
-    
-    layout = go.Layout({'xaxis': {
-    'range': [0.2, 1],
-    'showgrid': False, # thin lines in the background
-    'zeroline': False, # thick line at x=0
-    'visible': False,
-    'title': str('x, ' + units)},
-    'yaxis': {
-    'range': [0.2, 1],
-    'showgrid': False, # thin lines in the background
-    'zeroline': False, # thick line at x=0
-    'visible': False,
-    'title': 'aaaaaa'},
-    },
-    margin={'l': 0, 'r': 0, 'b': 0, 't': 0},
-    scene=dict(aspectmode='data', xaxis=dict(title=dict(text='x, '+units)),  yaxis=dict(title=dict(text='y, '+units)),  zaxis=dict(title=dict(text='z, '+units))),
+    layout = go.Layout(
+        {
+            "xaxis": {
+                "range": [0.2, 1],
+                "showgrid": False,
+                "zeroline": False,
+                "visible": False,
+                "title": str("x, " + units),
+            },
+            "yaxis": {
+                "range": [0.2, 1],
+                "showgrid": False,
+                "zeroline": False,
+                "visible": False,
+                "title": "aaaaaa",
+            },
+        },
+        margin={"l": 0, "r": 0, "b": 0, "t": 0},
+        scene=dict(
+            aspectmode="data",
+            xaxis=dict(title=dict(text="x, " + units)),
+            yaxis=dict(title=dict(text="y, " + units)),
+            zaxis=dict(title=dict(text="z, " + units)),
+        ),
     )
-    plot_figure = go.Figure(data=data, layout=layout)
-    
 
+    plot_figure = go.Figure(data=data, layout=layout)
+
+    if equal_axis:
+    # enforce equal units on all axes if asked
+        _set_equal_axes(plot_figure, x, y, z)
     if obs_column_name and not gene_names:
         pass
     else:
-        add_legend_continuous(plot_figure, colors_list_cont, cmin_list, cmax_list, gene_names)
-      
-    if background_black:
-        plot_figure.update_layout(paper_bgcolor='rgba(0,0,0,255)', font=dict(color= 'white'))
-        plot_figure.update_scenes(xaxis=set_bgcolor(), 
-                      yaxis=set_bgcolor(), 
-                      zaxis=set_bgcolor())
+        add_legend_continuous(
+            plot_figure, colors_list_cont, cmin_list, cmax_list, gene_names
+        )
 
-    
-    # Render the plot.
-    #plotly.offline.iplot(plot_figure)
+    if background_black:
+        plot_figure.update_layout(
+            paper_bgcolor="rgba(0,0,0,255)",
+            font=dict(color="white"),
+        )
+        plot_figure.update_scenes(
+            xaxis=set_bgcolor(),
+            yaxis=set_bgcolor(),
+            zaxis=set_bgcolor(),
+        )
+
     if save_html:
         plot_figure.write_html(save_html)
+
     return plot_figure
