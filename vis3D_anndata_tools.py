@@ -360,6 +360,51 @@ def get_xyz(
 
     return x, y, z, row_order
 
+
+def prepare_traces_categorical(
+    x, y, z,
+    column,
+    values,
+    markersize,
+    opacity,
+    show_unassigned=True,
+    grey_color='#eeeeee',
+    categorical_colors=None
+):
+    colormap_discrete = ['#e69f00', '#56b4e9', '#009e73', '#f0e442', '#0072b2', '#d55e00', '#cc79a7','#000000']
+    traces =[]; IDX = []
+    if not values:
+        values = np.unique(column)
+
+    for roi, i in zip(values, range(len(values))):
+        idx = column==roi
+        idx = np.where(idx.values==True)[0]
+        IDX+=list(idx)
+        xx = x[idx]; yy = y[idx]; zz = z[idx]
+
+        if categorical_colors is not None and roi in categorical_colors:
+            color = categorical_colors[roi]
+        else:
+            color = colormap_discrete[i % len(colormap_discrete)]
+
+        traces.append(go.Scatter3d(
+            x=xx, y=yy, z=zz,
+            mode='markers',
+            marker={'size': markersize, 'opacity': opacity, 'color': color},
+            name=roi
+        ))
+
+    if show_unassigned:
+        xx = np.delete(x, IDX); yy = np.delete(y, IDX); zz = np.delete(z, IDX)
+        traces.append(go.Scatter3d(
+            x=xx, y=yy, z=zz,
+            mode='markers',
+            marker={'size': markersize, 'opacity': opacity, 'color': grey_color},
+            name="unassigned"
+        ))
+
+    return traces
+
 def plot_3D_interactive_plotly(
     adata,
     obs_column_name=None,
@@ -380,7 +425,8 @@ def plot_3D_interactive_plotly(
     thickness_one_section=5,
     show_unassigned=True,
     use_obsm_z=True,
-    equal_axis = False
+    equal_axis=False,
+    categorical_colors=None
 ):
     """
     Plot 3D points from AnnData.
@@ -420,7 +466,8 @@ def plot_3D_interactive_plotly(
         )
         column = adata.obs[obs_column_name].iloc[row_order]
         trace = prepare_traces_categorical(
-            x, y, z, column, values, markersize, opacity, show_unassigned
+            x, y, z, column, values, markersize, opacity, show_unassigned,
+            categorical_colors=categorical_colors
         )
         data = trace
 
